@@ -3,9 +3,11 @@ package service
 import (
 	"errors"
 	"gorm.io/gorm"
+	"log"
 	"usercenter/config"
 	"usercenter/dto"
 	"usercenter/model"
+	"usercenter/utils"
 )
 
 // RegisterResult 服务层注册结果
@@ -15,10 +17,16 @@ type RegisterResult struct {
 	User    *model.User // 成功时返回用户信息
 }
 
-func Register(userinfo dto.RegisterDTO) RegisterResult {
+type LoginResult struct {
+	Code     int
+	Username string
+	Token    string
+}
+
+func Register(userRegister dto.RegisterDTO) RegisterResult {
 	//判断用户是否已存在
 	var user model.User
-	result := config.DB.Where("username = ?", userinfo.Username).First(&user)
+	result := config.DB.Where("username = ?", userRegister.Username).First(&user)
 	if result.Error == nil {
 		return RegisterResult{
 			Code: dto.ErrCodeUserAlreadyExists,
@@ -30,11 +38,18 @@ func Register(userinfo dto.RegisterDTO) RegisterResult {
 		}
 	}
 
+	hashedPwd, err := utils.HashPassword(userRegister.Password)
+	if err != nil {
+		log.Println("密码加密失败:", err)
+		return RegisterResult{
+			Code: dto.ErrCodePwdHashFailed,
+		}
+	}
 	//创建用户
 	newUser := model.User{
-		Username:    userinfo.Username,
-		Password:    userinfo.Password,
-		PhoneNumber: userinfo.MobilePhoneNum,
+		Username:    userRegister.Username,
+		Password:    hashedPwd,
+		PhoneNumber: userRegister.MobilePhoneNum,
 	}
 
 	if err := config.DB.Create(&newUser).Error; err != nil {
@@ -48,4 +63,40 @@ func Register(userinfo dto.RegisterDTO) RegisterResult {
 			User: &newUser,
 		}
 	}
+}
+
+func Login(userLogin dto.LoginDTO) LoginResult {
+	var user model.User
+	result := config.DB.Where("username = ?", userLogin.Username).First(&user)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return LoginResult{
+				Code:     dto.ErrCodeUserNotExists,
+				Username: userLogin.Username,
+			}
+		}
+		return LoginResult{
+			Code:     dto.ErrCodeLoginFailed,
+			Username: userLogin.Username,
+		}
+	}
+	if !utils.CheckPasswordHash(userLogin.Password, user.Password) {
+		return LoginResult{
+			Code:     dto.ErrCodePwdIsNotRight,
+			Username: userLogin.Username,
+		}
+	}
+	token, err := utils.GenerateToken(&user)
+	if err != nil {
+		return LoginResult{
+			Code:     dto.ErrCodeTokenGenerateFailed,
+			Username: userLogin.Username,
+		}
+	}
+	return LoginResult{
+		Code:     dto.CodeSuccess,
+		Username: user.Username,
+		Token:    token,
+	}
+
 }
