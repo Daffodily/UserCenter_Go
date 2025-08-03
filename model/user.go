@@ -1,0 +1,10 @@
+package model
+
+import "gorm.io/gorm"
+
+type User struct {
+	gorm.Model
+	Username    string
+	Password    string `gorm:"not null"`
+	PhoneNumber string `gorm:"not null"`
+}
